@@ -1,167 +1,115 @@
 import * as SI from "systeminformation";
 import byteFormat from "./byteFormat";
-import { MetricCtrProps } from "./constants";
+import { removeSubscript } from "./utils";
 
-/**
- * Converts a byte value into a nicely formatted string.
- * @param bytes The number of bytes to format.
- * @param option An optional options object to customize formatting behavior. By default, it uses binary units, no space,
- * a single unit suffix, and sets the minimum and maximum significant digits to 1 and 4. This object can override these defaults.
- * @returns The formatted byte size as a string.
- */
-const pretty = (bytes: number, option: any = {}): string => {
-	// Format the bytes using the byteFormat function, merging default options with user-provided ones
-	return byteFormat(bytes, {
-		binary: true, // Use binary units
-		space: false, // Do not add a space before the unit
-		single: true, // Use a single unit, e.g., don't display both KB and MB
-		minimumFractionDigits: 1, // Minimum fraction digits
-		minimumIntegerDigits: 1, // Minimum integer digits
-		minimumSignificantDigits: 4, // Minimum significant digits
-		maximumSignificantDigits: 4, // Maximum significant digits
-		...option, // Override default options with user-provided ones
-	});
-};
+export class Metrics {
+	private static readonly metricMap: { [key: string]: [string, string, string] } = {
+		"cpu.usage": ["currentLoad", "currentLoad", "%"],
+		"cpu.speed": ["cpuCurrentSpeed", "avg", "GHz"],
+		"cpu.temperature": ["cpuTemperature", "main", "°C"],
+		"memory.total": ["mem", "total", "B"],
+		"memory.used": ["mem", "used", "B"],
+		"memory.active": ["mem", "active", "B"],
+		"gpu.usage": ["graphics", "controllers", "%"],
+		"gpu.temperature": ["graphics", "controllers", "°C"],
+		"gpu.memory.total": ["graphics", "controllers", "B"],
+		"gpu.memory.used": ["graphics", "controllers", "B"],
+		"disk.read": ["fsStats", "rx_sec", "B/s"],
+		"disk.write": ["fsStats", "wx_sec", "B/s"],
+		"network.upload": ["networkStats", "tx_sec", "B/s"],
+		"network.download": ["networkStats", "rx_sec", "B/s"],
+		"battery.hasBattery": ["battery", "hasBattery", "(Battery)"],
+		"battery.percent": ["battery", "percent", "%"],
+		"battery.isCharging": ["battery", "isCharging", "(Charging)"],
+		"os.distro": ["osInfo", "distro", ""],
+	};
+	public static readonly availableMetrics: string[] = Object.keys(this.metricMap);
 
-const cpuText = async () => {
-	const cl = await SI.currentLoad();
-	return `$(pulse)${cl.currentLoad.toLocaleString(undefined, {
-		maximumSignificantDigits: 3,
-		minimumSignificantDigits: 3,
-	})}%`;
-};
+	static async getMetrics(requiredMetrics: string[] = []): Promise<Metrics> {
+		const valueObject: { [key: string]: string } = {};
+		for (const metric of requiredMetrics) {
+			const existedAttributes = valueObject[this.metricMap[metric][0]] ?? "";
+			if (!existedAttributes.includes(this.metricMap[metric][1])) {
+				valueObject[this.metricMap[metric][0]] = existedAttributes + "," + this.metricMap[metric][1];
+			}
+		}
+		const values = await SI.get(valueObject);
+		return new Metrics(values);
+	}
 
-const memActiveText = async () => {
-	const m = await SI.mem();
-	let active, total;
-	if (Number(pretty(m.total, { suffix: false })) < 100) {
-		active = pretty(m.active, {
-			minimumSignificantDigits: 3,
-			maximumSignificantDigits: 3,
+	cpu: { usage: number; speed: number; temperature: number };
+	memory: { total: number; used: number; active: number };
+	gpu: { usage: number; temperature: number; memoryTotal: number; memoryUsed: number }[];
+	disk: { read: number; write: number };
+	network: { upload: number; download: number }[];
+	battery: { hasBattery: boolean; percent: number; isCharging: boolean };
+	os: { distro: string };
+
+	getMetricString(metric: string, precision: number): string {
+		const value = eval(`this.${metric}`);
+		metric = removeSubscript(metric);
+		if (typeof value === "string") {
+			return value;
+		} else if (typeof value === "number") {
+			if (Metrics.metricMap[metric][2].startsWith("B")) {
+				return Metrics.pretty(value, {
+					minimumSignificantDigits: precision,
+					maximumSignificantDigits: precision,
+				});
+			} else {
+				return value.toPrecision(precision) + Metrics.metricMap[metric][2];
+			}
+		} else if (typeof value === "boolean") {
+			return value ? Metrics.metricMap[metric][2] : "";
+		} else {
+			return "";
+		}
+	}
+
+	private constructor(values: any) {
+		this.cpu = {
+			usage: values?.currentLoad?.currentLoad ?? 0,
+			speed: values?.cpuCurrentSpeed?.avg ?? 0,
+			temperature: values?.cpuTemperature?.main ?? 0,
+		};
+		this.memory = {
+			total: values?.mem?.total ?? 0,
+			used: values?.mem?.used ?? 0,
+			active: values?.mem?.active ?? 0,
+		};
+		this.gpu = values?.graphics?.controllers?.map((c: any) => ({
+			usage: c?.utilizationGPU ?? 0,
+			temperature: c?.temperatureGPU ?? 0,
+			memoryTotal: c?.memoryTotal ?? 0,
+			memoryUsed: c?.memoryUsed ?? 0,
+		}));
+		this.disk = { read: values?.fsStats?.rx_sec ?? 0, write: values?.fsStats?.wx_sec ?? 0 };
+		this.network = values?.networkStats?.map((n: any) => ({ upload: n?.tx_sec ?? 0, download: n?.rx_sec ?? 0 }));
+		this.battery = {
+			hasBattery: values?.battery?.hasBattery ?? false,
+			percent: values?.battery?.percent ?? 0,
+			isCharging: values?.battery?.isCharging ?? false,
+		};
+		this.os = { distro: values?.osInfo?.distro ?? "" };
+	}
+
+	/**
+	 * Converts a byte value into a nicely formatted string.
+	 * @param bytes The number of bytes to format.
+	 * @param option An optional options object to customize formatting behavior. By default, it uses binary units, no space,
+	 * a single unit suffix, and sets the minimum and maximum significant digits to 1 and 4. This object can override these defaults.
+	 * @returns The formatted byte size as a string.
+	 */
+	private static pretty(bytes: number, option: any = {}): string {
+		return byteFormat(bytes, {
+			binary: true, // Use binary units
+			space: false, // Do not add a space before the unit
+			single: true, // Use a single unit, e.g., don't display both KB and MB
+			minimumFractionDigits: 1, // Minimum fraction digits
+			minimumIntegerDigits: 1, // Minimum integer digits
+			minimumSignificantDigits: 4, // Minimum significant digits
+			maximumSignificantDigits: 4, // Maximum significant digits
+			...option, // Override default options with user-provided ones
 		});
-		total = pretty(m.total, {
-			minimumSignificantDigits: 3,
-			maximumSignificantDigits: 3,
-		});
-	} else {
-		active = pretty(m.active);
-		total = pretty(m.total);
 	}
-
-	if (active.slice(-1) === total.slice(-1)) {
-		return `$(server)${active.slice(0, -1)}/${total}`;
-	}
-	return `$(server)${active}/${total}`;
-};
-
-const memUsedText = async () => {
-	const m = await SI.mem();
-	let used, total;
-	if (Number(pretty(m.total, { suffix: false })) < 100) {
-		used = pretty(m.used, {
-			minimumSignificantDigits: 3,
-			maximumSignificantDigits: 3,
-		});
-		total = pretty(m.total, {
-			minimumSignificantDigits: 3,
-			maximumSignificantDigits: 3,
-		});
-	} else {
-		used = pretty(m.used);
-		total = pretty(m.total);
-	}
-
-	if (used.slice(-1) === total.slice(-1)) {
-		return `$(server)${used.slice(0, -1)}/${total}`;
-	}
-	return `$(server)${used}/${total}`;
-};
-
-const netText = async () => {
-	const ns = await SI.networkStats();
-	return `$(cloud-download)${pretty(
-		ns?.[0]?.rx_sec ?? 0
-	)}/s $(cloud-upload)${pretty(ns?.[0]?.tx_sec ?? 0)}/s`;
-};
-
-/**
- * Retrieves and formats the file system read and write rate information.
- * No parameters.
- * @returns {Promise<string>} A promise that resolves to a formatted string of read and write rates, or an empty string if the data is unavailable or invalid.
- */
-const fsText = async () => {
-    // Fetches file system statistics
-	const fs = await SI.fsStats();
-
-    // Formats and returns the read and write rate information
-	return `$(log-in)${pretty(fs.wx_sec ?? 0)}/s $(log-out)${pretty(
-		fs.rx_sec ?? 0
-	)}/s`;
-};
-
-const batteryText = async () => {
-	const b = await SI.battery();
-	if (!b.hasBattery) {
-		return "";
-	}
-	return `$(plug)${b.percent}%${b.isCharging ? "(Charging)" : ""}`;
-};
-
-const cpuSpeedText = async () => {
-	let cpuCurrentSpeed = await SI.cpuCurrentSpeed();
-	return `$(dashboard) ${cpuCurrentSpeed.avg}GHz`;
-};
-
-const cpuTempText = async () => {
-	const cl = await SI.cpuTemperature();
-	if (!cl.main) {
-		return "";
-	}
-	return `$(thermometer)${cl.main}°C`;
-};
-
-const osDistroText = async () => {
-	const os = await SI.osInfo();
-	return `${os.distro}`;
-};
-
-const metrics: MetricCtrProps[] = [
-	{
-		func: cpuText,
-		section: "cpu",
-	},
-	{
-		func: memActiveText,
-		section: "memoryActive",
-	},
-	{
-		func: memUsedText,
-		section: "memoryUsed",
-	},
-	{
-		func: netText,
-		section: "network",
-	},
-	{
-		func: fsText,
-		section: "fileSystem",
-	},
-	{
-		func: batteryText,
-		section: "battery",
-	},
-	{
-		func: cpuTempText,
-		section: "cpuTemp",
-	},
-	{
-		func: cpuSpeedText,
-		section: "cpuSpeed",
-	},
-	{
-		func: osDistroText,
-		section: "osDistro",
-	},
-];
-
-export default metrics;
+}

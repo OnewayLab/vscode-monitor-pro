@@ -66,39 +66,19 @@
 		"configuration": {
 			"title": "Monitor Pro",
 			"properties": {
-				"monitor-pro.metrics": {
-					"type": "array",
-					"items": {
-						"type": "string",
-						"enum": [
-							"cpu",
-							"memoryActive",
-							"memoryUsed",
-							"network",
-							"fileSystem",
-							"battery",
-							"cpuTemp",
-							"cpuSpeed",
-							"osDistro"
-						]
-					},
-					"default": [
-						"cpu",
-						"memoryActive",
-						"memoryUsed",
-						"network",
-						"fileSystem",
-						"battery",
-						"cpuTemp",
-						"cpuSpeed",
-						"osDistro"
-					],
-					"description": "%config.metrics%"
-				},
 				"monitor-pro.refresh-interval": {
 					"type": "number",
-					"default": 3000,
+					"default": 1000,
 					"description": "%config.refresh-interval%"
+				},
+				"monitor-pro.metrics": {
+					"type": "string",
+					"default": "$(pulse){cpu.usage}  $(dashboard){cpu.speed}  $(thermometer){cpu.temperature}  $(server){memory.active}/{memory.total}  $(cloud-upload){network[0].upload}  $(cloud-download){network[0].download}  $(plug){battery.percent}{battery.isCharging}",
+					"description": "%config.metrics%"
+				},
+				"monitor-pro.precision": {
+					"type": "number",
+					"default": 3
 				}
 			}
 		}

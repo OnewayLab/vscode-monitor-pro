@@ -2,28 +2,22 @@
 // Import the module and reference it with the alias vscode in your code below
 import { workspace, ExtensionContext } from "vscode";
 import { powerShellRelease, powerShellStart } from "systeminformation";
-import { getRefreshInterval } from "./configuration";
-import { Metric, getEnabledMetrics } from "./metricsInit";
+import { Configuration } from "./configuration";
+import { MonitorStatusBarItem } from "./views";
 import I18n from "./i18n";
 
 let intervalIds: NodeJS.Timeout;
-let metrics: Metric[] = [];
-
-// workspace.onDidChangeConfiguration(() => {
-// 	deactivate();
-// 	activate();
-// });
+let statusBarItem: MonitorStatusBarItem;
 
 export const activate = async (ctx: ExtensionContext) => {
 	if (process.platform === "win32") {
 		powerShellStart();
 	}
 	I18n.init(ctx.extensionPath);
-	metrics.forEach((x) => x.dispose());
-	metrics = getEnabledMetrics();
-	const updateBarsText = async () =>
-		await Promise.all(metrics.map((x) => x.update()));
-	intervalIds = setInterval(updateBarsText, getRefreshInterval());
+	const config = new Configuration();
+	statusBarItem = new MonitorStatusBarItem(config);
+	const updateBarsText = () => statusBarItem.update();
+	intervalIds = setInterval(updateBarsText, config.refreshInterval);
 };
 
 export const deactivate = () => {
@@ -31,5 +25,5 @@ export const deactivate = () => {
 		powerShellRelease();
 	}
 	clearInterval(intervalIds);
-	metrics.forEach((x) => x.dispose());
+	statusBarItem.dispose();
 };
